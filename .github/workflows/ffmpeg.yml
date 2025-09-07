@@ -4,12 +4,20 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: "Version Name (used as tag)"
+        description: "Release Version (used as tag)"
         required: true
         type: string
       source_url:
         description: "Source URL for FFmpeg"
         required: true
+        type: string
+      lib_version_same_as_release:
+        description: "Use same version for libs as release version"
+        type: boolean
+        default: true
+      lib_version_override:
+        description: "Libs Version (only if different from release version)"
+        required: false
         type: string
       store_artifact:
         description: "Store Artifacts"
@@ -21,11 +29,25 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ github.event.inputs.version_name }}
+      lib_version: ${{ steps.set-lib-version.outputs.lib_version }}
     steps:
-      - name: Set Version
+      - name: Set Versions
+        id: set-lib-version
         run: |
-          echo "version=${{ github.event.inputs.version_name }}" >> "$GITHUB_ENV"
-          echo "version=${{ github.event.inputs.version_name }}" >> "$GITHUB_OUTPUT"
+          RELEASE_VERSION="${{ github.event.inputs.version_name }}"
+          if [[ "${{ github.event.inputs.lib_version_same_as_release }}" == "true" ]]; then
+            LIB_VERSION="$RELEASE_VERSION"
+          else
+            LIB_VERSION="${{ github.event.inputs.lib_version_override }}"
+          fi
+
+          echo "Release version: $RELEASE_VERSION"
+          echo "Lib version: $LIB_VERSION"
+
+          echo "version=$RELEASE_VERSION" >> "$GITHUB_ENV"
+          echo "lib_version=$LIB_VERSION" >> "$GITHUB_ENV"
+          echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "lib_version=$LIB_VERSION" >> "$GITHUB_OUTPUT"
 
   build:
     runs-on: ubuntu-latest
@@ -84,8 +106,8 @@ jobs:
           esac
 
           LIB_NAME="${TARGET}/libffmpeg.mx.so"
-          TARGET_LIB_NAME="${LIB_NAME}.${{ matrix.arch }}.${{ needs.setup.outputs.version }}"
-          TARGET_ARCHIVE_NAME="${OUT_DIR}/mx_${{ matrix.arch }}-${{ needs.setup.outputs.version }}.zip"
+          TARGET_LIB_NAME="${LIB_NAME}.${{ matrix.arch }}.${{ needs.setup.outputs.lib_version }}"
+          TARGET_ARCHIVE_NAME="${OUT_DIR}/mx_${{ matrix.arch }}-${{ needs.setup.outputs.lib_version }}.zip"
 
           mkdir -p "$TARGET"
           find "$TARGET" -type f \( -name "*.so" -o -name "*.a" \) -not -name "libmx*.so" -exec rm {} +
@@ -136,12 +158,12 @@ jobs:
         run: |
           mkdir temp
           unzip -q 'artifacts/*.zip' -d temp/
-          zip -j artifacts/mx_aio-${{ needs.setup.outputs.version }}.zip temp/*
+          zip -j artifacts/mx_aio-${{ needs.setup.outputs.lib_version }}.zip temp/*
 
       - name: Publish Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.event.inputs.version_name }}
+          tag_name: ${{ needs.setup.outputs.version }}
           files: artifacts/*.zip
           fail_on_unmatched_files: true
         env:
